@@ -42,6 +42,7 @@ dependencies:
   shelf_multipart:
   mime:
   http_parser:
+  flutter_riverpod: ^3.2.1
 
 dev_dependencies:
   flutter_test:
