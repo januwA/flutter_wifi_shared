@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../application/server_app_service.dart';
 
+
 class ServerStatusPanel extends ConsumerWidget {
   const ServerStatusPanel({super.key});
 
@@ -13,6 +14,12 @@ class ServerStatusPanel extends ConsumerWidget {
     if (!serverState.isRunning) {
       return const SizedBox.shrink(); // 未运行时不展示状态
     }
+
+    final features = <String>[];
+    if (serverState.shareFile) features.add('文件共享 (目录: ${serverState.selectedDirectory})');
+    if (serverState.shareClipboard) features.add('粘贴板共享');
+    
+    final shareInfo = features.isEmpty ? '无' : features.join('、');
 
     return Column(
       children: [
@@ -37,8 +44,13 @@ class ServerStatusPanel extends ConsumerWidget {
           ],
         ),
         const SizedBox(height: 8),
-        Text('分享的目录: ${serverState.selectedDirectory}'),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Text('分享内容: $shareInfo', textAlign: TextAlign.center),
+        ),
       ],
     );
   }
 }
+
+

@@ -7,4 +7,11 @@ abstract class ISystemService {
 
   /// 弹出目录选择器，让用户选择要分享的目录
   Future<String?> pickDirectory();
+
+  /// 获取系统粘贴板文本内容
+  Future<String?> getClipboardText();
+
+  /// 设置系统粘贴板文本内容
+  Future<void> setClipboardText(String text);
 }
+

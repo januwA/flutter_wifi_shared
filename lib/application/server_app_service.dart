@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../domain/entities/server_state.dart';
 import '../../domain/repositories/i_system_service.dart';
@@ -7,14 +8,21 @@ import '../../core/di/providers.dart';
 class ServerAppService extends Notifier<ServerState> {
   late final ISystemService _systemService;
   late final IHttpServerService _httpServerService;
+  Timer? _clipboardTimer;
+  String _lastClipboardText = '';
 
   @override
   ServerState build() {
     _systemService = ref.read(systemServiceProvider);
     _httpServerService = ref.read(httpServerServiceProvider);
     
-    // 初始化时获取一下 IP (可选)
     _fetchIp();
+
+    // 销毁时清理定时器
+    ref.onDispose(() {
+      _clipboardTimer?.cancel();
+    });
+
     return const ServerState();
   }
 
@@ -25,56 +33,104 @@ class ServerAppService extends Notifier<ServerState> {
     }
   }
 
+  void toggleShareFile(bool value) {
+    if (state.isRunning) return;
+    state = state.copyWith(shareFile: value);
+  }
+
+  void toggleShareClipboard(bool value) {
+    if (state.isRunning) return;
+    state = state.copyWith(shareClipboard: value);
+  }
+
+  void _startClipboardMonitoring() {
+    _clipboardTimer?.cancel();
+    _clipboardTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
+      final text = await _systemService.getClipboardText();
+      if (text != null && text.isNotEmpty && text != _lastClipboardText) {
+        _lastClipboardText = text;
+        
+        final history = List<String>.from(state.clipboardHistory);
+        // 如果已经存在则先移除，然后放到最前面 (类似于最近使用的逻辑，或者保持单纯的顺序)
+        // 这里采用单纯的顺序：如果有新内容就插到最前面
+        if (!history.contains(text)) {
+          history.insert(0, text);
+          if (history.length > 50) history.removeLast();
+          state = state.copyWith(clipboardHistory: history);
+        }
+      }
+    });
+  }
+
   Future<void> startServer() async {
     if (state.isRunning) return;
+    if (!state.shareFile && !state.shareClipboard) return;
 
-    // 1. 请求权限
-    final hasPermission = await _systemService.requestStoragePermission();
-    if (!hasPermission) {
-      return; // 权限被拒绝，理论上可以抛异常给 UI 显示
+    String directory = '';
+    if (state.shareFile) {
+      final hasPermission = await _systemService.requestStoragePermission();
+      if (!hasPermission) return;
+
+      final picked = await _systemService.pickDirectory();
+      if (picked == null || picked.isEmpty) return;
+      directory = picked;
     }
 
-    // 2. 选择目录
-    final directory = await _systemService.pickDirectory();
-    if (directory == null || directory.isEmpty) {
-      return; // 用户取消了选择
-    }
-
-    // 3. 开启服务器
     int port = 8080;
     const maxRetries = 10;
     int currentRetry = 0;
 
     while (currentRetry < maxRetries) {
       try {
-        final actualPort = await _httpServerService.startServer(port, directory);
-        // 4. 更新状态
+        final actualPort = await _httpServerService.startServer(
+          port,
+          directory,
+          shareFile: state.shareFile,
+          shareClipboard: state.shareClipboard,
+          getClipboard: _systemService.getClipboardText,
+          setClipboard: (text) async {
+             await _systemService.setClipboardText(text);
+             // 设置后立即更新本地监控状态，避免重复添加
+             _lastClipboardText = text;
+             if (!state.clipboardHistory.contains(text)) {
+                final history = [text, ...state.clipboardHistory];
+                if (history.length > 50) history.removeLast();
+                state = state.copyWith(clipboardHistory: history);
+             }
+          },
+          getClipboardHistory: () => state.clipboardHistory,
+        );
+        
+        if (state.shareClipboard) {
+          _startClipboardMonitoring();
+        }
+
         await _fetchIp();
         state = state.copyWith(
           port: actualPort.toString(),
           selectedDirectory: directory,
           isRunning: true,
         );
-        return; // 成功开启服务器，退出
+        return;
       } catch (e) {
-        // 如果是端口占用或其他 SocketException，则尝试下一个端口
         if (e.toString().contains('address already in use') || e.toString().contains('SocketException')) {
           port++;
           currentRetry++;
         } else {
-          // 其它异常直接报错退出
           _resetState();
           rethrow;
         }
       }
     }
 
-    // 重试次数达到上限
     _resetState();
-    // 这里也可以抛出一个特定的异常让 UI 捕获并显示
   }
 
   void _resetState() {
+    _clipboardTimer?.cancel();
+    _clipboardTimer = null;
+    _lastClipboardText = '';
+
     state = state.copyWith(
       ipAddress: '',
       port: '',
@@ -90,6 +146,7 @@ class ServerAppService extends Notifier<ServerState> {
     _resetState();
   }
 }
+
 
 final serverAppServiceProvider = NotifierProvider<ServerAppService, ServerState>(() {
   return ServerAppService();
