@@ -1,8 +1,8 @@
 # flutter_wifi_shared
 
 ```
-flutetr doctor -v
-flutetr run
+flutter doctor -v
+flutter run
 flutter build apk --release --split-per-abi
 flutter install --release
 ```
